@@ -1,0 +1,11 @@
+[package]
+name = "ab-bench"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+clap = { version = "4.5.57", features = ["derive"] }
+hyperscan = "0.3.2"
+itertools = "0.14.0"
+rand = "0.9.2"
+regex = "1.12.3"
