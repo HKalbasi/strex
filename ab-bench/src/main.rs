@@ -4,6 +4,7 @@ use clap::Parser;
 use itertools::Itertools;
 use rand::random_range;
 use regex::RegexSet;
+use strex::StrexSet;
 
 #[derive(Parser)]
 enum Command {
@@ -55,6 +56,12 @@ fn main() {
             //     let matches = regex_set.matches(&haystack);
             //     dbg!(matches.iter().count());
             // });
+
+            let strex_set = StrexSet::new(&regexes);
+            duration(|| {
+                let matches = strex_set.matches(&haystack);
+                dbg!(matches.count());
+            });
 
             use hyperscan::prelude::*;
 

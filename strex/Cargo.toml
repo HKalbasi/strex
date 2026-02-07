@@ -5,3 +5,4 @@ edition = "2024"
 
 [dependencies]
 aho-corasick = "1.1.4"
+strex-parser = { version = "0.1.0", path = "../strex-parser" }
