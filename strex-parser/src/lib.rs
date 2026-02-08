@@ -2,7 +2,7 @@ use chumsky::prelude::*;
 use itertools::Itertools;
 use std::fmt::Display;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StrexHir {
     Literal(String),
     Or(Vec<StrexHir>),
