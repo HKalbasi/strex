@@ -1,4 +1,7 @@
-use std::collections::{HashMap, HashSet, hash_map::Entry};
+use std::{
+    collections::{HashMap, HashSet, hash_map::Entry},
+    ops::Range,
+};
 
 use aho_corasick::AhoCorasick;
 use strex_parser::StrexHir;
@@ -80,7 +83,7 @@ impl StrexSetBuilder {
                 let (first, rest) = strex_hirs.split_first().unwrap();
                 let chain = Chain {
                     sub_chains: vec![],
-                    final_step: StepId(rest.len()),
+                    final_step: StepId(0),
                     result,
                 };
                 let id = self.add_chain(chain);
@@ -99,6 +102,7 @@ impl StrexSetBuilder {
                     self.add_strex_base(elem.clone(), WordJob::StepChain { id, step });
                     step.0 += 1;
                 }
+                self.chains[id.0].final_step = step;
             }
             StrexHir::Wild => panic!("Strex matches things unconditionally"),
         }
@@ -117,13 +121,19 @@ pub struct StrexSet {
     word_jobs: Vec<Vec<WordJob>>,
 }
 
-struct ChainState<'a> {
-    strex_set: &'a StrexSet,
-    matches: HashSet<StrexId>,
-    states: HashMap<ChainId, StepId>,
+#[derive(Debug)]
+struct ChainState {
+    step: StepId,
+    first_pos: usize,
 }
 
-impl ChainState<'_> {
+struct State<'a> {
+    strex_set: &'a StrexSet,
+    matches: HashSet<StrexId>,
+    states: HashMap<ChainId, ChainState>,
+}
+
+impl State<'_> {
     fn kill_chain(&mut self, chain: ChainId) {
         if self.states.remove(&chain).is_some() {
             for sub_chain in &self.strex_set.chains[chain.0].sub_chains {
@@ -132,32 +142,43 @@ impl ChainState<'_> {
         }
     }
 
-    fn do_step(&mut self, chain: ChainId) {
-        let step = self.states.get_mut(&chain).unwrap();
-        step.0 += 1;
-        if *step == self.strex_set.chains[chain.0].final_step {
+    fn do_step(&mut self, chain: ChainId, pos: Range<usize>) {
+        let state = self.states.get_mut(&chain).unwrap();
+        state.first_pos = pos.end;
+        state.step.0 += 1;
+        if state.step == self.strex_set.chains[chain.0].final_step {
             self.kill_chain(chain);
-            self.do_word_job(self.strex_set.chains[chain.0].result);
-            return;
+            self.do_word_job(self.strex_set.chains[chain.0].result, pos);
         }
     }
 
-    fn do_word_job(&mut self, word_job: WordJob) {
+    fn do_word_job(&mut self, word_job: WordJob, range: Range<usize>) {
         match word_job {
             WordJob::DoMatch { id } => {
                 self.matches.insert(id);
             }
             WordJob::StartChain { id, pre_condition } => {
                 if let Some((chain, step)) = pre_condition {
-                    if self.states.get(&chain) != Some(&step) {
+                    if self
+                        .states
+                        .get(&chain)
+                        .is_none_or(|state| state.step != step || state.first_pos > range.start)
+                    {
                         return;
                     }
                 }
-                self.states.insert(id, StepId(1));
+                self.states.entry(id).or_insert(ChainState {
+                    step: StepId(1),
+                    first_pos: range.end,
+                });
             }
             WordJob::StepChain { id, step } => {
-                if self.states.get(&id) == Some(&step) {
-                    self.do_step(id);
+                if self
+                    .states
+                    .get(&id)
+                    .is_some_and(|state| state.step == step && state.first_pos <= range.start)
+                {
+                    self.do_step(id, range);
                 }
             }
         }
@@ -183,8 +204,8 @@ impl StrexSet {
         }
     }
 
-    fn new_state(&self) -> ChainState<'_> {
-        ChainState {
+    fn new_state(&self) -> State<'_> {
+        State {
             strex_set: self,
             matches: HashSet::new(),
             states: HashMap::new(),
@@ -194,9 +215,9 @@ impl StrexSet {
     pub fn matches(&self, haystack: &str) -> impl Iterator<Item = StrexId> {
         let mut chain_state = self.new_state();
 
-        for word_match in self.aho.find_iter(haystack) {
+        for word_match in self.aho.find_overlapping_iter(haystack) {
             for word_job in &self.word_jobs[word_match.pattern().as_usize()] {
-                chain_state.do_word_job(*word_job);
+                chain_state.do_word_job(*word_job, word_match.span().range());
             }
         }
 
